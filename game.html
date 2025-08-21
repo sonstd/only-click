@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Only Click</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #2b2b2b 0%, #1a1a1a 100%);
+            font-family: 'Arial', sans-serif;
+        }
+        .game-container {
+            text-align: center;
+            background: #1e1e1e;
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.5);
+            position: relative;
+            width: 100%;
+            max-width: 660px;
+        }
+        canvas {
+            border: 3px solid #555;
+            border-radius: 15px;
+            cursor: pointer;
+            margin: 20px 0;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.5);
+            background: #2a2a2a;
+        }
+        .score-info {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 20px;
+            font-size: 18px;
+            font-weight: bold;
+            position: absolute;
+            top: 10px;
+            left: 20px;
+            right: 20px;
+        }
+        .level { color: #4dabf7; }
+        .lives { color: #ff6b6b; }
+        .game-title {
+            font-size: 28px;
+            color: #e0e0e0;
+            margin-bottom: 60px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1 class="game-title">🎯 Only Click</h1>
+        <div class="score-info">
+            <div class="level">ROUND: <span id="round">1</span></div>
+            <div class="lives"><span id="lives">❤️❤️❤️</span></div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let gameState = 'waiting';
+        let lives = 3;
+        let round = 1;
+        let currentInstruction = '';
+        let instructionColor = '#e0e0e0';
+        let boxes = [];
+        let textTimer;
+        let showInstruction = true;
+        let textDisplayTime = 2.0;
+        let startTime;
+        const boxSize = 70;
+        let isProcessingClick = false;
+        let isTimerExpired = false;
+
+        function resizeCanvas() {
+            const maxWidth = Math.min(window.innerWidth - 40, 600);
+            const maxHeight = Math.min(window.innerHeight - 200, 400);
+            canvas.width = maxWidth;
+            canvas.height = maxHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        const correctSound = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
+        const wrongSound = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
+
+        const colors = [
+            { color: '#FF0000', korean: '빨간색', english: 'red' },
+            { color: '#FFA500', korean: '주황색', english: 'orange' },
+            { color: '#FFFF00', korean: '노란색', english: 'yellow' },
+            { color: '#00FF00', korean: '초록색', english: 'green' },
+            { color: '#0000FF', korean: '파란색', english: 'blue' },
+            { color: '#800080', korean: '보라색', english: 'purple' },
+            { color: '#000000', korean: '검정색', english: 'black' },
+            { color: '#FFFFFF', korean: '하얀색', english: 'white' },
+            { color: '#8B4513', korean: '갈색', english: 'brown' }
+        ];
+
+        const shapes = ['square', 'circle', 'triangle'];
+
+        function startGame() {
+            if (gameState === 'playing') return;
+            gameState = 'playing';
+            lives = 3;
+            round = 1;
+            textDisplayTime = 1.7; // 1라운드 시작 시간
+            showInstruction = true;
+            isTimerExpired = false;
+            updateUI();
+            generateNewRound();
+        }
+
+        function generateNewRound() {
+            if (gameState !== 'playing') return;
+
+            // 제한시간 설정
+            if (round <= 10) {
+                textDisplayTime = Math.max(0.8, 1.7 - (round - 1) * 0.1); // 1.7초에서 0.1초 감소, 10라운드 0.8초
+            } else if (round <= 20) {
+                textDisplayTime = Math.max(1.0, 1.9 - (round - 11) * 0.1); // 11라운드 1.9초에서 0.1초 감소, 20라운드 1.0초
+            } else {
+                textDisplayTime = Math.max(1.5, 2.4 - (round - 21) * 0.1); // 21라운드 2.4초에서 0.1초 감소, 30라운드 1.5초, 이후 1.5초 유지
+                if (round >= 30) textDisplayTime = 1.5;
+            }
+
+            showInstruction = true;
+            startTime = Date.now();
+            isTimerExpired = false;
+
+            // 라운드별 박스 개수
+            let boxCount;
+            if (round <= 10) boxCount = 4;
+            else if (round <= 20) boxCount = 6;
+            else if (round <= 30) boxCount = 8;
+            else boxCount = 10;
+
+            boxes = [];
+            const gridSize = Math.ceil(Math.sqrt(boxCount));
+            const cellWidth = canvas.width / gridSize;
+            const cellHeight = (canvas.height - 100) / gridSize;
+            const positions = [];
+            for (let i = 0; i < gridSize; i++) {
+                for (let j = 0; j < gridSize; j++) {
+                    positions.push({ x: i * cellWidth, y: j * cellHeight + 100 });
+                }
+            }
+            positions.sort(() => Math.random() - 0.5);
+
+            const shuffledColors = [...colors].sort(() => Math.random() - 0.5).slice(0, boxCount);
+            for (let i = 0; i < boxCount; i++) {
+                const shape = round >= 21 ? shapes[Math.floor(Math.random() * shapes.length)] : 'square';
+                boxes.push({
+                    x: positions[i].x + (cellWidth - boxSize) / 2,
+                    y: positions[i].y + (cellHeight - boxSize) / 2,
+                    width: boxSize,
+                    height: boxSize,
+                    color: shuffledColors[i].color,
+                    korean: shuffledColors[i].korean,
+                    english: shuffledColors[i].english,
+                    shape: shape
+                });
+            }
+
+            // 혼동: 타겟 색과 모양을 만족하는 도형을 반드시 포함
+            let targetColorObj = null;
+            if (round >= 21) {
+                const targetShape = shapes[Math.floor(Math.random() * shapes.length)];
+                targetColorObj = shuffledColors[Math.floor(Math.random() * shuffledColors.length)];
+                currentInstruction = `Click the ${targetColorObj.english} ${targetShape}!`;
+
+                // 타겟 도형을 반드시 포함
+                const targetBox = {
+                    x: positions[0].x + (cellWidth - boxSize) / 2,
+                    y: positions[0].y + (cellHeight - boxSize) / 2,
+                    width: boxSize,
+                    height: boxSize,
+                    color: targetColorObj.color,
+                    korean: targetColorObj.korean,
+                    english: targetColorObj.english,
+                    shape: targetShape
+                };
+                boxes[0] = targetBox; // 첫 번째 위치에 타겟 도형 고정
+
+                // 혼동 도형 추가
+                const otherShape1 = shapes.find(s => s !== targetShape);
+                const otherShape2 = shapes.find(s => s !== targetShape && s !== otherShape1);
+                const otherColor1 = shuffledColors.find(c => c.color !== targetColorObj.color);
+                const otherColor2 = shuffledColors.find(c => c.color !== targetColorObj.color && c.color !== otherColor1.color);
+
+                if (boxes.length >= 4) {
+                    boxes[1].shape = otherShape1;
+                    boxes[1].color = targetColorObj.color; // 타겟 색의 다른 모형
+                    boxes[2].shape = targetShape;
+                    boxes[2].color = otherColor1 ? otherColor1.color : shuffledColors[0].color; // 타겟 모형의 다른 색
+                    boxes[3].shape = otherShape2;
+                    boxes[3].color = otherColor2 ? otherColor2.color : shuffledColors[1].color; // 추가 혼동
+                }
+            } else {
+                const targetBox = boxes[Math.floor(Math.random() * boxes.length)];
+                currentInstruction = `Click the ${targetBox.english} square!`;
+            }
+
+            // 11라운드부터 지시문 색상 적용
+            if (round >= 11) {
+                const targetColor = round >= 21 && targetColorObj ? targetColorObj.color : (boxes.find(b => currentInstruction.includes(b.english)) ? boxes.find(b => currentInstruction.includes(b.english)).color : boxes[0].color);
+                const availableColors = boxes.map(box => box.color).filter(color => color !== targetColor);
+                instructionColor = availableColors.length > 0 ? availableColors[Math.floor(Math.random() * availableColors.length)] : '#e0e0e0';
+            } else {
+                instructionColor = '#e0e0e0';
+            }
+
+            drawGame();
+            animateTimer();
+
+            clearTimeout(textTimer);
+            textTimer = setTimeout(() => {
+                if (gameState === 'playing') {
+                    isTimerExpired = true;
+                    lives -= 1;
+                    wrongSound.play();
+                    showFeedback('Time out! -1 life', '#F44336');
+                    if (lives <= 0) {
+                        setTimeout(endGame, 1000);
+                    } else {
+                        setTimeout(generateNewRound, 1100); // 약간의 딜레이 추가
+                    }
+                    updateUI();
+                    isProcessingClick = false;
+                }
+            }, textDisplayTime * 1000);
+        }
+
+        function drawShape(box) {
+            switch (box.shape) {
+                case 'square':
+                    ctx.fillRect(box.x, box.y, box.width, box.height);
+                    break;
+                case 'circle':
+                    ctx.beginPath();
+                    ctx.arc(box.x + box.width / 2, box.y + box.height / 2, box.width / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    break;
+                case 'triangle':
+                    ctx.beginPath();
+                    ctx.moveTo(box.x + box.width / 2, box.y);
+                    ctx.lineTo(box.x + box.width, box.y + box.height);
+                    ctx.lineTo(box.x, box.y + box.height);
+                    ctx.closePath();
+                    ctx.fill();
+                    break;
+            }
+        }
+
+        function isPointInShape(box, x, y) {
+            const path = new Path2D();
+            switch (box.shape) {
+                case 'square':
+                    path.rect(box.x, box.y, box.width, box.height);
+                    break;
+                case 'circle':
+                    path.arc(box.x + box.width / 2, box.y + box.height / 2, box.width / 2, 0, Math.PI * 2);
+                    break;
+                case 'triangle':
+                    path.moveTo(box.x + box.width / 2, box.y);
+                    path.lineTo(box.x + box.width, box.y + box.height);
+                    path.lineTo(box.x, box.y + box.height);
+                    path.closePath();
+                    break;
+            }
+            return ctx.isPointInPath(path, x, y);
+        }
+
+        function drawGame() {
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (gameState === 'waiting') {
+                ctx.fillStyle = '#e0e0e0';
+                ctx.font = 'bold 28px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('click to start', canvas.width / 2, canvas.height / 2);
+                return;
+            }
+
+            if (gameState === 'ended') {
+                drawGameOverScreen();
+                return;
+            }
+
+            if (showInstruction) {
+                ctx.font = 'bold 24px Arial';
+                ctx.textAlign = 'center';
+                const text = currentInstruction;
+                const x = canvas.width / 2;
+                const y = 40;
+                ctx.fillStyle = instructionColor;
+                ctx.fillText(text, x, y);
+            }
+
+            boxes.forEach(box => {
+                if (box.shape === 'square') {
+                    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                    ctx.fillRect(box.x + 3, box.y + 3, box.width, box.height);
+                }
+                ctx.fillStyle = box.color;
+                drawShape(box);
+                ctx.strokeStyle = '#555';
+                ctx.lineWidth = 2;
+                drawShape(box); // stroke for shape
+            });
+        }
+
+        function animateTimer() {
+            if (!showInstruction || gameState !== 'playing') return;
+            const elapsed = (Date.now() - startTime) / 1000;
+            const remaining = Math.max(0, textDisplayTime - elapsed);
+            const progress = remaining / textDisplayTime;
+
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, canvas.width, 100);
+            if (showInstruction) {
+                ctx.font = 'bold 24px Arial';
+                ctx.textAlign = 'center';
+                const text = currentInstruction;
+                const x = canvas.width / 2;
+                const y = 40;
+                ctx.fillStyle = instructionColor;
+                ctx.fillText(text, x, y);
+                ctx.fillStyle = '#ff6b6b';
+                ctx.fillRect(50, 55, (canvas.width - 100) * progress, 5);
+                ctx.strokeStyle = '#555';
+                ctx.strokeRect(50, 55, canvas.width - 100, 5);
+            }
+            if (progress > 0) {
+                requestAnimationFrame(animateTimer);
+            }
+        }
+
+        function drawGameOverScreen() {
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#e0e0e0';
+            ctx.font = 'bold 32px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Game Over!', canvas.width / 2, canvas.height / 2 - 50);
+            ctx.font = '24px Arial';
+            ctx.fillText(`your record: ${round}`, canvas.width / 2, canvas.height / 2);
+            ctx.font = '18px Arial';
+            ctx.fillText('click to start again', canvas.width / 2, canvas.height / 2 + 100);
+        }
+
+        function handleCanvasClick(event) {
+            if (gameState === 'waiting' || gameState === 'ended') {
+                startGame();
+                return;
+            }
+
+            if (gameState !== 'playing' || isProcessingClick || isTimerExpired) return;
+
+            isProcessingClick = true;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = (event.clientX || event.touches[0].clientX) - rect.left;
+            const y = (event.clientY || event.touches[0].clientY) - rect.top;
+
+            const clickedBox = boxes.find(box => isPointInShape(box, x, y));
+
+            if (clickedBox) {
+                clearTimeout(textTimer);
+                showInstruction = false;
+                const correctColor = currentInstruction.includes(clickedBox.english);
+                const correctShape = currentInstruction.includes(clickedBox.shape);
+                let isCorrect = correctColor && correctShape;
+
+                if (isCorrect || lives > 1) {
+                    round += 1;
+                }
+                if (isCorrect) {
+                    correctSound.play();
+                    showFeedback('Correct! Next round', '#4CAF50');
+                    setTimeout(() => {
+                        generateNewRound();
+                        isProcessingClick = false;
+                    }, 1000); // 피드백 후 다음 라운드 강제 전환
+                } else {
+                    if (!isTimerExpired) {
+                        lives -= 1;
+                        wrongSound.play();
+                        showFeedback('Wrong! -1 life', '#F44336');
+                        if (lives <= 0) {
+                            setTimeout(endGame, 1000);
+                        } else {
+                            setTimeout(() => {
+                                generateNewRound();
+                                isProcessingClick = false;
+                            }, 1000);
+                        }
+                    }
+                }
+                updateUI();
+            } else {
+                isProcessingClick = false;
+            }
+        }
+
+        function showFeedback(message, color) {
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = color;
+            ctx.font = 'bold 20px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(message, canvas.width / 2, canvas.height / 2);
+        }
+
+        function endGame() {
+            gameState = 'ended';
+            lives = 0;
+            clearTimeout(textTimer);
+            updateUI();
+            drawGameOverScreen();
+        }
+
+        function updateUI() {
+            document.getElementById('round').textContent = round;
+            document.getElementById('lives').textContent = '❤️'.repeat(lives);
+        }
+
+        canvas.addEventListener('click', handleCanvasClick);
+        canvas.addEventListener('touchstart', (event) => {
+            event.preventDefault();
+            handleCanvasClick(event);
+        });
+
+        drawGame();
+    </script>
+</body>
+</html>
